@@ -1,0 +1,234 @@
+Problem Statement:
+You are given two tables:
+
+Employee table with the following columns:
+
+id (employee ID)
+
+name (employee name)
+
+salary (employee salary)
+
+did (department ID, foreign key referencing the department)
+
+Department table with the following columns:
+
+id (department ID)
+
+name (department name)
+
+Task:
+Write an SQL query to calculate the total salary paid by each department. The result should display the department name and the total salary of all employees in that department.
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ANSWER:
+SELECT d.name AS department_name,
+       SUM(e.salary) AS total_salary
+FROM Employee e
+JOIN Department d ON e.did = d.id
+GROUP BY d.name;
+__________________________________________________________________________________________________________________________________________________________________________________
+
+For the same problem statement as above with same tables and columns
+Write a PySpark program to compute the total salary paid by each department. The output should show each department's name along with the sum of salaries of all employees belonging to that department.
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ANSWER:
+result_df = (employee_df
+             .join(department_df, employee_df.did == department_df.id, "inner")
+             .groupBy(department_df.name)
+             .agg(sum("salary").alias("total_salary")))
+result_df.show()
+___________________________________________________________________________________________________________________________________________________________________________________
+
+Problem Statement:
+You are given two tables:
+
+Student table:
+
+id (student ID)
+
+name (student name)
+
+Marks table:
+
+id (student ID — foreign key referencing Student table)
+
+subject (name of the subject)
+
+marks (marks obtained in the subject)
+
+Task:
+Write an SQL query to find the student(s) who scored the highest marks in each subject.
+If multiple students have the same top score in a subject, include all of them in the result.
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ANSWER:
+WITH rankedMarks AS (
+    SELECT 
+        s.name AS student_name,
+        m.subject,
+        m.marks,
+        RANK() OVER (PARTITION BY m.subject ORDER BY m.marks DESC) AS rnk
+    FROM student s
+    JOIN marks m ON s.id = m.id
+)
+SELECT 
+    student_name,
+    subject,
+    marks
+FROM rankedMarks
+WHERE rnk = 1;
+
+___________________________________________________________________________________________________________________________________________________________________________________
+Same question asked above in pyspark:
+
+joined_df = student.df.join(marks_df, "id", "inner")
+
+window_spec = window.partitionBy("subject").orderby(col("marks").desc())
+
+raned_df = joined_df.withcolumn("rank", rank().over(window_spec))
+
+result_df = ranked_df.filter(col("rank")==1).select("name", "subject", "marks")
+
+result_df.show()
+___________________________________________________________________________________________________________________________________________________________________________________
+Problem Statement:
+You are given an Employee table with the following columns:
+
+id (Employee ID)
+
+name (Employee Name)
+
+dept (Department Name)
+
+salary (Employee Salary)
+
+Task:
+Write an SQL query to find the employees with the 3rd highest salary in each department.
+If multiple employees share the same 3rd highest salary in a department, include all of them.
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ANSWER:
+WITH rankedSalaries AS (
+    SELECT 
+        id, 
+        name, 
+        dept, 
+        salary,
+        DENSE_RANK() OVER (PARTITION BY dept ORDER BY salary DESC) AS rnk
+    FROM employee
+)
+SELECT 
+    id, 
+    name, 
+    dept, 
+    salary
+FROM rankedSalaries
+WHERE rnk = 3;
+___________________________________________________________________________________________________________________________________________________________________________________
+
+Problem Statement:
+You are given a dataset (as a DataFrame) with the following columns:
+
+id (User ID)
+
+name (User Name)
+
+location (City where the user has been present)
+
+Each user can appear in multiple rows with different locations.
+
+Task:
+Write a PySpark query to group the data by user ID and name, and return a list of all locations visited by each user in a single row per user.
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ANSWER:
+from pyspark.sql.functions import collect_list
+
+result_df = df.groupBy("id", "name").agg(
+    collect_list("location").alias("locations")
+)
+
+result_df.show()
+___________________________________________________________________________________________________________________________________________________________________________________
+Problem Statement:
+You are given a delimited text file (e.g., CSV) containing structured data.
+Your task is to:
+
+Read this file into a PySpark DataFrame using a specified delimiter (e.g., comma ,, pipe |, etc.).
+
+Ensure that the header row is used for column names.
+
+Add two new columns to the DataFrame:
+
+A String type column (e.g., named New_string_column) with a default value.
+
+An Integer type column (e.g., named New_Integer_column) with a constant value.
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ANSWER:
+
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import lit
+from pyspark.sql.types import StringType, IntegerType
+
+# Initialize Spark session (if not already done)
+spark = SparkSession.builder.appName("AddColumnsExample").getOrCreate()
+
+# File path and delimiter
+file_path = "pathtothefile"
+delimiter = ","
+
+# Read the delimited file into a DataFrame
+df = spark.read.option("header", True).option("delimiter", delimiter).csv(file_path)
+
+# Add new string and integer columns
+df = df.withColumn("New_string_column", lit("defaultvalue").cast(StringType())) \
+       .withColumn("New_Integer_column", lit(100).cast(IntegerType()))
+
+# Show the resulting DataFrame
+df.show()
+___________________________________________________________________________________________________________________________________________________________________________________
+Problem Statement:
+You are given two datasets:
+
+TableA (Original Data):
+
+ID	Name	Dept	Salary
+1	Ashish	IT	10
+2	Henil	HR	20
+TableA_inc (Incremental/Updated Data):
+
+ID	Name	Dept	Salary
+2	Henil	IT	30
+Your task is to:
+
+Merge the two tables (TableA and TableA_inc) using ID as the key.
+
+If a record exists in both tables, update the values from TableA_inc.
+
+If a record exists only in TableA, keep it as-is.
+
+The final result should reflect the latest values from TableA_inc wherever available, and fallback to original values in TableA otherwise.
+
+✅ Expected Output:
+
+ID	Name	Dept	Salary
+1	Ashish	IT	10
+2	Henil	IT	30
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ANSWER:
+from pyspark.sql.functions import coalesce
+
+# Assuming dfA and dfA_inc are the two DataFrames representing TableA and TableA_inc
+
+merged_df = dfA.alias("a").join(
+    dfA_inc.alias("b"),
+    on="id",  # joining on the ID column
+    how="left"
+)
+
+final_df = merged_df.select(
+    merged_df["id"],
+    coalesce(merged_df["b.name"], merged_df["a.name"]).alias("Name"),
+    coalesce(merged_df["b.dept"], merged_df["a.dept"]).alias("Dept"),
+    coalesce(merged_df["b.salary"], merged_df["a.salary"]).alias("Salary")
+)
+
+final_df.show()
+___________________________________________________________________________________________________________________________________________________________________________________
