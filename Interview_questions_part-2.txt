@@ -1,0 +1,351 @@
+Problem Statement:
+You are given a DataFrame containing population data at a city level with the following columns:
+
+Country
+
+State
+
+City
+
+Population
+
+Your task is to:
+
+Sort the cities in descending order of population.
+
+Create a new column called Running_Diff that calculates the difference in population between the current city and the city just above it (based on the sorted population order).
+
+For the top city (first row), the Running_Diff should be null since there is no city above it.
+
+Input:
+Country	State	City	Population
+USA	California   Los Angeles	4000000
+USA	California	San Diego	1500000
+USA	California	San Francisco	1500000
+USA	Texas			Houston	2300000
+USA	Texas	Dallas	1300000
+USA	Texas	Austin	950000
+India	Maharashtra	Mumbai	20000000
+India	Maharashtra	Pune	6000000
+India	Karnataka	Bangalore	10000000
+India	Karnataka	Mysore	920000
+
+Sample Output Format:
+
+Country	State	City	Population	Running_Diff
+India	Maharashtra	Mumbai	20000000	null
+India	Karnataka	Bangalore	10000000	10000000
+India	Maharashtra	Pune	6000000	4000000
+USA	California	Los Angeles	4000000	2000000
+USA	Texas	Houston	2300000	1700000
+...	...	...	...	...
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ANSWER:
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import col, lag
+from pyspark.sql.window import Window
+
+# Initialize Spark session
+spark = SparkSession.builder.appName("CityPopulationAnalysis").getOrCreate()
+
+# Sample data (you can replace this with reading from a file)
+data = [
+    ("USA", "California", "Los Angeles", 4000000),
+    ("USA", "California", "San Diego", 1500000),
+    ("USA", "California", "San Francisco", 1500000),
+    ("USA", "Texas", "Houston", 2300000),
+    ("USA", "Texas", "Dallas", 1300000),
+    ("USA", "Texas", "Austin", 950000),
+    ("India", "Maharashtra", "Mumbai", 20000000),
+    ("India", "Maharashtra", "Pune", 6000000),
+    ("India", "Karnataka", "Bangalore", 10000000),
+    ("India", "Karnataka", "Mysore", 920000),
+]
+
+# Create DataFrame
+columns = ["Country", "State", "City", "Population"]
+df = spark.createDataFrame(data, columns)
+
+# Sort DataFrame by descending population
+df_sorted = df.orderBy(col("Population").desc())
+
+# Define window specification
+window_spec = Window.orderBy(col("Population").desc())
+
+# Calculate running difference
+from pyspark.sql.functions import expr
+
+df_final = df_sorted.withColumn(
+    "Running_Diff",
+    col("Population") - lag("Population", 1).over(window_spec)
+)
+
+# Show the final DataFrame
+df_final.show(truncate=False)
+______________________________________________________________________________________________________________________________________________________________________________
+
+Problem Statement:
+You are given a DataFrame containing countries and a comma-separated list of player names for each country:
+
+Input Table:
+
+country	players
+ind	virat, kohli
+aus	steave, smith
+Your task is to:
+
+Split the comma-separated list of players into individual names.
+
+Explode each player into a separate row while retaining the country.
+
+Standardize the country column to be a 3-letter lowercase string (if not already).
+
+Produce a new DataFrame where each player appears in its own row along with their country.
+
+Expected Output:
+
+country	player
+ind	virat
+ind	kohli
+aus	steave
+aus	smith
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ANSWER:
+
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import split, explode, col
+
+# Initialize Spark session
+spark = SparkSession.builder.appName("SplitPlayers").getOrCreate()
+
+# Sample data
+data = [
+    ("ind", "virat, kohli"),
+    ("aus", "steave, smith")
+]
+columns = ["country", "players"]
+
+# Create DataFrame
+df = spark.createDataFrame(data, columns)
+
+# Step 1: Split the 'players' column into an array
+df_split = df.withColumn("players", split(col("players"), ", "))
+
+# Step 2: Explode the array into individual rows
+df_exploded = df_split.select(
+    col("country"),
+    explode(col("players")).alias("player")
+)
+
+# Step 3: Standardize country name (ensure it's first 3 characters - just as a placeholder)
+df_final = df_exploded.withColumn("country", col("country").substr(1, 3))
+
+# Show the final DataFrame
+df_final.show(truncate=False)
+______________________________________________________________________________________________________________________________________________________________________________
+Problem Statement:
+You are given a dataset containing student test performance details with the following columns:
+
+studentid – Unique identifier for each student
+
+studentname – Name of the student
+
+subject – Subject of the test
+
+marks – Marks scored in the test
+
+testid – Unique identifier for each test
+
+testdate – Date on which the test was conducted
+
+Your task is to:
+
+Rank students by their marks in each subject.
+
+Identify the student(s) who scored the second highest marks in each subject.
+
+Identify the student(s) who scored the second lowest marks in each subject.
+
+Display their subject name, student name, and marks in the output.
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ANSWERS:
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import col, dense_rank
+from pyspark.sql.window import Window
+
+# Initialize Spark session
+spark = SparkSession.builder.appName("StudentRanking").getOrCreate()
+
+# Sample data (replace with your actual DataFrame)
+data = [
+    (1, "Alice", "Math", 90, "T1", "2023-01-01"),
+    (2, "Bob", "Math", 85, "T1", "2023-01-01"),
+    (3, "Charlie", "Math", 92, "T1", "2023-01-01"),
+    (4, "David", "Math", 70, "T1", "2023-01-01"),
+    (5, "Eva", "Science", 88, "T2", "2023-01-01"),
+    (6, "Frank", "Science", 92, "T2", "2023-01-01"),
+    (7, "Grace", "Science", 85, "T2", "2023-01-01"),
+]
+
+columns = ["studentid", "studentname", "subject", "marks", "testid", "testdate"]
+
+# Create DataFrame
+df = spark.createDataFrame(data, columns)
+
+# Define window specs
+window_spec_desc = Window.partitionBy("subject").orderBy(col("marks").desc())
+window_spec_asc = Window.partitionBy("subject").orderBy(col("marks").asc())
+
+# Add ranks
+df_ranked = df.withColumn("rank_high", dense_rank().over(window_spec_desc)) \
+              .withColumn("rank_low", dense_rank().over(window_spec_asc))
+
+# Filter second highest and second lowest
+second_highest = df_ranked.filter(col("rank_high") == 2).select("subject", "studentname", "marks")
+second_lowest = df_ranked.filter(col("rank_low") == 2).select("subject", "studentname", "marks")
+
+# Show results
+print("Students with Second Highest Marks in Each Subject:")
+second_highest.show(truncate=False)
+
+print("Students with Second Lowest Marks in Each Subject:")
+second_lowest.show(truncate=False)
+______________________________________________________________________________________________________________________________________________________________________________
+Problem Statement:
+You are given a dataset of sales transactions with the following columns:
+
+transaction_id – Unique ID for each transaction
+
+product_id – Unique identifier for each product
+
+product_name – Name of the product
+
+quantity – Number of units sold in the transaction
+
+price_per_unit – Price of a single unit of the product
+
+Your goal is to:
+
+Calculate the total revenue for each product.
+
+Revenue for a transaction = quantity × price_per_unit
+
+Total revenue per product = sum of revenue across all its transactions
+
+Identify the top 5 products that have generated the highest total revenue.
+
+Display the product names and their corresponding total revenue in descending order.
+
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import col, sum
+
+# Initialize Spark session
+spark = SparkSession.builder.appName("TopProductsRevenue").getOrCreate()
+
+# Sample data
+data = [
+    (1, 101, "Product A", 2, 50),
+    (2, 102, "Product B", 1, 100),
+    (3, 101, "Product A", 3, 50),
+    (4, 103, "Product C", 4, 30),
+    (5, 102, "Product B", 2, 100),
+]
+
+columns = ["transaction_id", "product_id", "product_name", "quantity", "price_per_unit"]
+
+# Create DataFrame
+df = spark.createDataFrame(data, columns)
+
+# Step 1: Calculate total revenue for each transaction
+df_with_revenue = df.withColumn("total_revenue", col("quantity") * col("price_per_unit"))
+
+# Step 2: Group by product and calculate total revenue
+revenue_df = df_with_revenue.groupBy("product_name") \
+    .agg(sum("total_revenue").alias("total_revenue")) \
+    .orderBy(col("total_revenue").desc())
+
+# Step 3: Get top 5 products by revenue
+top_5_products = revenue_df.limit(5)
+
+# Show result
+top_5_products.show(truncate=False)
+______________________________________________________________________________________________________________________________________________________________________________
+Problem Statement:
+You are given a table Seats with the following structure:
+
+
+seat_id	free
+1	1
+2	0
+3	1
+4	1
+5	1
+Each row represents whether a seat is free (1) or not (0).
+
+Your Task:
+Identify and return the seat_ids of all seats that are part of two or more consecutive free seats.
+In other words, find all free seats that have at least one neighboring seat (before or after) that is also free.
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ANSWER:
+
+WITH consecutive_seats AS (
+    SELECT seat_id, free,
+           LEAD(free) OVER (ORDER BY seat_id) AS next_free,
+           LAG(free)  OVER (ORDER BY seat_id) AS prev_free
+    FROM Seats
+)
+SELECT seat_id
+FROM consecutive_seats
+WHERE free = 1 AND (next_free = 1 OR prev_free = 1);
+______________________________________________________________________________________________________________________________________________________________________________
+Problem Statement:
+You are given an array of integers nums and an integer target.
+Your task is to find the indices of two distinct elements in the array such that:
+
+Copy
+Edit
+nums[i] + nums[j] == target
+You may not use the same element twice.
+
+It is guaranteed that there is exactly one valid solution.
+
+You can return the answer in any order.
+
+Example Inputs and Outputs:
+Example 1:
+
+makefile
+Copy
+Edit
+Input:  nums = [2, 7, 11, 15], target = 9  
+Output: [0, 1]  
+Explanation: nums[0] + nums[1] = 2 + 7 = 9
+Example 2:
+
+makefile
+Copy
+Edit
+Input:  nums = [3, 2, 4], target = 6  
+Output: [1, 2]  
+Explanation: nums[1] + nums[2] = 2 + 4 = 6
+Example 3:
+
+makefile
+Copy
+Edit
+Input:  nums = [3, 3], target = 6  
+Output: [0, 1]
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+ANSWER:
+def two_sum(nums, target):
+    num_map = {}  # Stores number -> index mapping
+    
+    for i, num in enumerate(nums):
+        complement = target - num
+        if complement in num_map:
+            return [num_map[complement], i]  # Found the pair
+        
+        num_map[num] = i  # Store the number with its index
+
