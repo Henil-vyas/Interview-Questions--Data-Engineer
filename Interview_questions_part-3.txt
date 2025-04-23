@@ -1,0 +1,618 @@
+Problem Statement:
+You are given a table named SALESTable that contains monthly sales data of various products sold by different companies.
+
+The table includes the following columns:
+
+Company – Name of the company
+
+Product – Name of the product
+
+Month – Month of the sale (e.g., Jan'23)
+
+Sales – Sales amount for that product in that month
+
+Your Task:
+For each company, identify the product that generated the highest total sales (i.e., sum of monthly sales across all months).
+
+Return the company name, product name, and the total sales amount of that top-performing product.
+------------------------------------------------------------------------------------------------------------------------------
+WITH RankedSales AS (
+    SELECT 
+        company, 
+        product, 
+        SUM(sales) AS totalSales,
+        RANK() OVER (PARTITION BY company ORDER BY SUM(sales) DESC) AS rnk
+    FROM SALESTable
+    GROUP BY company, product
+)
+
+SELECT company, product, totalSales
+FROM RankedSales
+WHERE rnk = 1;
+________________________________________________________________________________________________________________________________
+Problem Statement:
+You are given a transaction dataset that contains information about product purchases over time. The dataset includes the following columns:
+
+transaction_id – Unique ID for each transaction
+
+product_id – ID of the product involved in the transaction
+
+spend – Amount spent in the transaction
+
+transaction_date – Date when the transaction occurred
+
+Your Task:
+Write an SQL query to calculate the Year-on-Year (YoY) growth rate in total spend for each product_id.
+
+The final output should include:
+
+The year
+
+The total spend for that year
+
+The previous year's spend
+
+The calculated YoY growth rate as a percentage
+
+Expected Output Columns:
+year
+
+total_spend
+
+prev_year_spend
+
+yoy_growth (in percentage)
+------------------------------------------------------------------------------------------------------------------------------
+ANSWER:
+WITH yearly_spend AS (
+    SELECT
+        YEAR(transaction_date) AS year,
+        SUM(spend) AS total_spend
+    FROM Transact
+    GROUP BY YEAR(transaction_date)
+),
+growth_calc AS (
+    SELECT 
+        year,
+        total_spend,
+        LAG(total_spend) OVER (ORDER BY year) AS prev_year_spend
+    FROM yearly_spend
+)
+SELECT
+    year,
+    total_spend,
+    prev_year_spend,
+    ROUND(((total_spend - prev_year_spend) / prev_year_spend) * 100, 2) AS yoy_growth
+FROM growth_calc;
+________________________________________________________________________________________________________________________________
+Problem Statement:
+You are given a single-column table with the name table1 that contains a list of distinct values, for example:
+
+
+col1
+A
+B
+C
+Your Task:
+Generate pairwise matchups or comparisons of the values in the column, using two different approaches:
+Expected Output:
+A vs B  
+B vs C  
+C vs A
+------------------------------------------------------------------------------------------------------------------------------------
+ANSWER:
+WITH CTE AS (
+  SELECT col1, LEAD(col1) OVER () AS next_col
+  FROM table1
+)
+SELECT col1 || ' vs ' || next_col AS Output
+FROM CTE
+WHERE next_col IS NOT NULL
+
+UNION ALL
+
+SELECT 
+  (SELECT col1 FROM table1 ORDER BY col1 DESC LIMIT 1) || ' vs ' ||
+  (SELECT col1 FROM table1 ORDER BY col1 ASC LIMIT 1);
+________________________________________________________________________________________________________________________________
+Problem Statement:
+You are given a student dataset with the following columns:
+
+
+stud_id	stud_name	class	mark
+1	John		A	85
+2	Jane		B	89
+3	Joe		A	NULL
+4	Sarah		C	95
+5	Mike		B	NULL
+6	Emily		A	91
+7	David		C	NULL
+8	Olivia		B	89
+9	Ben		A	NULL
+10	Lily		C	90
+
+Fill in the missing marks for students by replacing the NULL values with the average marks of their respective class.
+-----------------------------------------------------------------------------------------------------------------------------------
+ANSWER:
+# Step 1: Calculate average marks per class
+class_avg = df.groupBy("class").agg(avg("marks").alias("avg_marks"))
+
+# Step 2: Join this average back with the original dataset
+df_filled = df.join(class_avg, "class", "left") \
+    .withColumn("marks", when(col("marks").isNull(), col("avg_marks")).otherwise(col("marks"))) \
+    .drop("avg_marks")
+
+# Display the result
+df_filled.show()
+_______________________________________________________________________________________________________________________________________
+Problem Statement:
+You are tasked with building an AWS Lambda function that triggers and manages AWS Glue jobs and EMR clusters, based on the input parameters in the event. The function should:
+
+Receive input parameters such as dataset_size_gb, job_type, and s3_script_path from the event.
+
+Based on the job_type value, trigger either:
+
+A Glue job for data processing using a script from an S3 path (for "glue" jobs).
+
+An EMR cluster job for large dataset processing (for "emr" jobs).
+-----------------------------------------------------------------------------------------------------------------------------------
+ANSWER:
+import boto3
+
+# Initialize the AWS clients for Glue and EMR
+glue_client = boto3.client('glue')
+emr_cluster = boto3.client('emr')
+
+emr_cluster_id = "dshgds"
+
+def lambda_handler(event, context):
+    # Extract the dataset size (default to 1GB) and job type from the event
+    dataset_size = event.get('dataset_size_gb', 1)
+    job_type = event.get('job_type')
+    glue_job_name = "my-glue-job"  # Name of the Glue job to be triggered
+    s3_script_path = event.get('s3_script_path', 's3://bucket-name/')
+
+    # Check the job type and decide which AWS service to trigger
+    if job_type == "glue":
+        # Trigger Glue job
+        response = glue_client.start_job_run(
+            JobName=glue_job_name,
+            Arguments={
+                '--dataset_size_gb': str(dataset_size),
+                '--script_path': s3_script_path
+            }
+        )
+        print(f"Glue Job triggered with response: {response}")
+        
+    elif job_type == "emr":
+        # Trigger EMR cluster processing
+        response = emr_cluster.run_job_flow(
+            Name='EMR-Processing-Job',
+            LogUri='s3://bucket-name/logs/',
+            ReleaseLabel='emr-6.3.0',
+            Instances={
+                'InstanceGroups': [
+                    {
+                        'Name': 'Master',
+                        'InstanceRole': 'MASTER',
+                        'InstanceType': 'm5.xlarge',
+                        'InstanceCount': 1
+                    },
+                    {
+                        'Name': 'Core',
+                        'InstanceRole': 'CORE',
+                        'InstanceType': 'm5.xlarge',
+                        'InstanceCount': 3
+                    }
+                ]
+            },
+            Steps=[{
+                'Name': 'ProcessData',
+                'ActionOnFailure': 'TERMINATE_JOB_FLOW',
+                'HadoopJarStep': {
+                    'Jar': 's3://bucket-name/process-data.jar',
+                    'Args': [f'--dataset_size={dataset_size}', f'--script={s3_script_path}']
+                }
+            }]
+        )
+        print(f"EMR Job triggered with response: {response}")
+    
+    else:
+        # Handle invalid job type
+        print("Invalid job type provided.")
+______________________________________________________________________________________________________________________________
+Problem Statement:
+You are given a dataset representing defects in products, with the following schema:
+
+
+id	name	defect
+1	ProductA	{ defect_id: 101, defect_position: { defect_pos_x: 5, defect_pos_y: 10, defect_pos_z: 15 } }
+2	ProductB	{ defect_id: 102, defect_position: { defect_pos_x: 3, defect_pos_y: 6, defect_pos_z: 9 } }
+our task is to flatten the structure of this dataset, extracting relevant defect information, so that the output includes columns for the defect_id, defect_position, and individual defect coordinates (defect_pos_x, defect_pos_y, defect_pos_z), while retaining the id and name of the product.
+-------------------------------------------------------------------------------------------------------------------------------
+ANSWER:
+from pyspark.sql.functions import col
+
+# Flatten the DataFrame to extract the nested structure
+df_flat = df.select(
+    col("id"),
+    col("name"),
+    col("defect.defect_id").alias("ID1"),
+    col("defect.defect_position").alias("defect_pos"),
+    col("defect.defect_position.defect_pos_x").alias("defect_x"),
+    col("defect.defect_position.defect_pos_y").alias("defect_y"),
+    col("defect.defect_position.defect_pos_z").alias("defect_z")
+)
+
+# Show the flattened DataFrame
+df_flat.show()
+
+# Optionally, explode the defect positions if there are multiple defects
+df_exploded = df.select("id", "name", explode(col("defect")).alias("defects"))
+df_exploded.show()
+______________________________________________________________________________________________________________________________
+Problem Statement:
+You are given an employee dataset that may contain duplicate rows for the same employee based on Emp_ID. Your task is to remove duplicate entries and return only one unique row per employee, keeping the first occurrence (based on default ordering).
+
+🧾 Input Table (Emp):
+
+Emp_ID	Emp_Name	State	Salary
+1	Darpan	MP	10
+2	Mousam	UP	20
+2	Mousam	UP	20
+2	Mousam	UP	20
+--------------------------------------------------------------------------------------------------------------------------------------
+ANSWER:
+
+WITH cte AS (
+    SELECT emp_id, emp_name, state, salary,
+           ROW_NUMBER() OVER (PARTITION BY emp_id) AS rn
+    FROM Emp
+)
+SELECT emp_id, emp_name, state, salary
+FROM cte
+WHERE rn = 1;
+_______________________________________________________________________________________________________________________________________
+Problem Statement:
+You are given a CSV file containing a dataset with a column name. Your task is to:
+
+Read the CSV file into a PySpark DataFrame.
+
+Transform the name column by converting all names to uppercase.
+
+Filter the rows where the original name (in lowercase) starts with 'a' and ends with 'a'.
+
+Select and display the transformed uppercase names.
+
+Example:
+Input CSV:
+
+name
+anna
+alina
+Amara
+mark
+AnA
+aloka
+
+Expected Output:
+
+name
+ANNA
+ALINA
+AMARA
+ANA
+ALOKA
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ANSWER:
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import col, upper, lower
+
+spark = SparkSession.builder.appName("CSV_Transformation").getOrCreate()
+
+input_path = "/path/to/input/file.csv"
+
+# Read CSV
+df = spark.read.csv(input_path, header=True, inferSchema=True)
+
+# Filter names starting and ending with 'a' (case insensitive), and convert to uppercase
+transform_df = df.filter(lower(col("name")).like("a%a")) \
+                 .withColumn("name", upper(col("name")))
+
+# Show the result
+transform_df.select("name").show()
+_____________________________________________________________________________________________________________________________________________________________________
+Problem Statement:
+Given a weather dataset spanning 10 years, where each record contains a city, date, and temperature, identify all cities that experienced a temperature below -25°C for at least 3 consecutive days.
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ANSWERS:
+WITH tempData AS (
+    SELECT  
+        city, 
+        date,
+        temp,
+        LAG(date, 1) OVER (PARTITION BY city ORDER BY date) AS previousdate1,
+        LAG(date, 2) OVER (PARTITION BY city ORDER BY date) AS previousdate2
+    FROM weather
+    WHERE temp < -25
+)
+SELECT DISTINCT city
+FROM tempData
+WHERE 
+    date = previousdate1 + INTERVAL '1 day' AND
+    previousdate1 = previousdate2 + INTERVAL '1 day';
+_____________________________________________________________________________________________________________________________________________________________________
+Problem Statement:
+Given two tables (Table A and Table B) with a common column id, find all the IDs in Table A that do not have a matching ID in Table B. The solution must be implemented without using a subquery, and should utilize DataFrame operations such as filter, select, groupBy, join, and show.
+Example:
+Table A:
+
+id
+1
+2
+3
+4
+5
+Table B:
+
+id
+3
+4
+5
+Expected Output:
+
+id
+1
+2
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ANSWER:
+SELECT a.id 
+FROM a 
+LEFT JOIN b ON a.id = b.id 
+WHERE b.id IS NULL;
+_____________________________________________________________________________________________________________________________________________________________________
+Problem Statement:
+You have two datasets representing employee records from two different dates:
+
+1st February: contains initial records of employees.
+
+2nd February: contains updated or new employee records.
+
+Each record has:
+
+name
+
+age
+
+salary
+
+The goal is to merge the two datasets so that:
+
+For employees appearing in both datasets, keep the latest record (from 2nd Feb).
+
+For new employees (only in the 2nd Feb data), include them.
+
+For old employees not present in the 2nd Feb data, retain their existing record from the 1st Feb.
+
+The output should be a consolidated DataFrame with the latest or most accurate information.
+
+Final Output Example:
+
+name	age	salary
+abc	30	13000
+xyz	30	11000
+JKL	31	12000
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ANSWER:
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import col, when
+
+# Sample Spark session
+spark = SparkSession.builder.getOrCreate()
+
+# Sample data
+data_1st_feb = [("abc", 30, 10000), ("xyz", 30, 11000)]
+data_2nd_feb = [("JKL", 31, 12000), ("abc", 30, 13000)]
+
+columns = ["name", "age", "salary"]
+
+# Create DataFrames
+df_1st_feb = spark.createDataFrame(data_1st_feb, columns)
+df_2nd_feb = spark.createDataFrame(data_2nd_feb, columns)
+
+# Outer join on name to merge old and new records
+merged_df = df_1st_feb.alias("first").join(
+    df_2nd_feb.alias("second"),
+    col("first.name") == col("second.name"),
+    "outer"
+).select(
+    col("second.name").alias("name"),
+    col("second.age").alias("age"),
+    col("second.salary").alias("salary"),
+    col("first.name").alias("existing_name"),
+    col("first.salary").alias("existing_salary")
+)
+
+# Choose updated salary if available, else fall back to existing salary
+final_df = merged_df.withColumn(
+    "final_salary",
+    when(col("salary").isNotNull(), col("salary"))
+    .otherwise(col("existing_salary"))
+).withColumn(
+    "final_age",
+    when(col("age").isNotNull(), col("age"))
+    .otherwise(lit(None))
+).select(
+    col("name"),
+    col("final_age").alias("age"),
+    col("final_salary").alias("salary")
+)
+
+# Show final output
+final_df.show()
+_____________________________________________________________________________________________________________________________________________________________________
+Problem Statement:
+You are working with a dataset containing three columns A, B, and C, with some null (missing) values.
+
+Objectives:
+Replace all null values in each column with the mean of that column.
+
+You are also performing a join between two large DataFrames (sales_df and item_master_df), where one of them (item_master_df) is small enough to fit in memory. You should optimize this join using broadcasting.
+
+Given Sample Data:
+
+A	B	C
+10	null	25
+20	30	35
+null	40	40
+30	50	null
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ANSWER:
+Part 1: Replacing nulls with mean
+import pandas as pd
+import numpy as np
+
+# Sample data
+data = {
+    'A': [10, 20, None, 30],
+    'B': [None, 30, 40, 50],
+    'C': [25, 35, 40, None]
+}
+
+df = pd.DataFrame(data)
+
+# Fill nulls with column mean
+df = df.apply(lambda x: x.fillna(x.mean()))
+
+print(df)
+
+Part 2: Optimized Spark Join with Broadcast
+
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import broadcast
+
+spark = SparkSession.builder.getOrCreate()
+
+# Example: broadcast join
+broadcast_item_master_df = broadcast(item_master_df)
+
+joined_df = sales_df.join(
+    broadcast_item_master_df,
+    sales_df.item_id == broadcast_item_master_df.item_id,
+    "inner"
+)
+
+joined_df.show()
+_____________________________________________________________________________________________________________________________________________________________________
+Problem Statement:
+You are given a table named 'f_c_name' with two columns:
+
+father
+
+child
+
+Each row represents a direct parent-child relationship.
+The task is to find and return a list of grandfather-grandchild pairs, where:
+
+A person is a grandfather if they are the father of someone (say, X), and
+
+That person (X) is also a father to another child (grandchild).
+
+Example Data:
+
+father	child
+x	y
+y	z
+z	l
+From this data:
+
+x → y → z → l
+
+So:
+
+x is grandfather of z
+
+y is grandfather of l
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ANSWERS:
+SQL Query:
+sql
+Copy
+Edit
+SELECT 
+    f1.father AS grandfather, 
+    f2.child AS grandchild
+FROM 
+    f_c_name f1
+JOIN 
+    f_c_name f2 
+ON 
+    f1.child = f2.father;
+---------------------------------------
+PySpark Code:
+python
+Copy
+Edit
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import col
+
+spark = SparkSession.builder.getOrCreate()
+
+# Sample Data
+data = [("x", "y"), ("y", "z"), ("z", "l")]
+columns = ["father", "child"]
+
+df = spark.createDataFrame(data, columns)
+
+# Self Join to find grandfather-grandchild pairs
+result_df = df.alias("f1").join(
+    df.alias("f2"),
+    col("f1.child") == col("f2.father")
+).select(
+    col("f1.father").alias("grandfather"),
+    col("f2.child").alias("grandchild")
+)
+
+result_df.show()
+__________________________________________________________________________________________________________________________________________________
+Problem Statement:
+You are designing a simple object-oriented system in Python to represent vehicles using an Engine interface.
+
+The system should:
+
+Define a base class Engine that acts as an interface with two methods:
+
+start()
+
+stop()
+
+Define a derived class Car that:
+
+Inherits from Engine
+
+Implements the start() and stop() methods with its own custom behavior
+
+Has an additional attribute engine_id initialized via the constructor
+
+The goal is to demonstrate inheritance and method overriding in Python.
+------------------------------------------------------------------------------------------------------------------------------------------------------------
+ANSWER:
+# Base class acting as interface
+class Engine():
+    def start(self):
+        pass  # Placeholder for method to be overridden
+
+    def stop(self):
+        pass  # Placeholder for method to be overridden
+
+# Derived class implementing Engine interface
+class Car(Engine):
+    def __init__(self, engine_id):
+        self.engine_id = engine_id  # Unique ID for the engine
+
+    def start(self):
+        print("car engine starts")  # Custom implementation
+
+    def stop(self):
+        print("car engine stops")  # Custom implementation
+_____________________________________________________________________________________________________________________________________________________________________
